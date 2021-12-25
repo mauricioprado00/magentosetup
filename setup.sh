@@ -86,6 +86,8 @@ services:
     composer:
         build: config/composer
         container_name: composer
+        volumes:
+          - /home/${USER}/.composer-home:/root/.composer/
         volumes_from:
         - appdata
     appdata:
@@ -128,6 +130,8 @@ function filter-list
 }
 
 # create Dockerfile for composer container
+# use https://github.com/hirak/prestissimo
+mkdir -p /home/${USER}/.composer-home
 mkdir -p config/composer/
 printf '%s' "$extensions_already_included" > .extensions_already_included
 docker run --rm php:${php_version}-alpine php -m | grep -v '\[' | filter-list | grep -v '^$' > .extensions_already_included
@@ -154,6 +158,7 @@ RUN cp /usr/lib/php7/modules/* /usr/local/lib/php/extensions/\$(ls /usr/local/li
 RUN cp /etc/php7/conf.d/* /usr/local/etc/php/conf.d
 RUN apk add zip zlib-dev libzip libzip-dev
 RUN docker-php-ext-install zip
+RUN composer global require hirak/prestissimo
 
 DOCKERFILE
 
@@ -223,5 +228,5 @@ docker-compose up -d --build
 
 # Create magento project
 
-./bin/composer.sh create-project --repository=https://repo.magento.com/ magento/${magento_distribution}:${magento_version} .
+./bin/composer.sh create-project --repository-url=https://repo.magento.com/ magento/${magento_distribution}:${magento_version} --no-progress --profile --prefer-dist .
 
