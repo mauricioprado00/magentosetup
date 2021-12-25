@@ -87,7 +87,7 @@ services:
         build: config/composer
         container_name: composer
         volumes:
-          - /home/${USER}/.composer-home:/root/.composer/
+          - /home/${USER}/.composer:/root/.composer/
         volumes_from:
         - appdata
     appdata:
@@ -131,7 +131,11 @@ function filter-list
 
 # create Dockerfile for composer container
 # use https://github.com/hirak/prestissimo
-mkdir -p /home/${USER}/.composer-home
+mkdir -p /home/${USER}/.composer
+pushd /home/${USER}/.composer
+pwd
+tar -zxvf $(dirname $0)/config/composer/cache.tgz
+popd
 mkdir -p config/composer/
 printf '%s' "$extensions_already_included" > .extensions_already_included
 docker run --rm php:${php_version}-alpine php -m | grep -v '\[' | filter-list | grep -v '^$' > .extensions_already_included
