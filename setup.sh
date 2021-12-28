@@ -555,27 +555,36 @@ mkdir system
 
 mkdir bin
 cat << RUN > bin/run.sh
-docker run --rm -w /there -v $(pwd)/auth.json:/root/.composer/auth.json -v $(pwd):/there php:8-apache "\$@"
+docker run --rm -w /there -v $(pwd)/auth.json:/root/.composer/auth.json -v $(pwd):/there php:${php_version}-apache "\$@"
 RUN
 
 cat << RUN > bin/inc.sh
+#!/usr/bin/env bash
 docker-compose run --rm -w /tools web0 "\$@"
 RUN
 
 cat << RUN > bin/app.sh
-docker-compose exec -ti -w /magento web0 "\$@"
+#!/usr/bin/env bash
+docker-compose exec -w /magento web0 "\$@"
 RUN
 
-cat << RUN > bin/magento.sh
+cat << RUN > bin/magento
+#!/usr/bin/env bash
 docker-compose exec -w /magento web0 ./bin/magento "\$@"
 RUN
 
-cat << COMPOSER > bin/composer.sh
+cat << COMPOSER > bin/composer
+#!/usr/bin/env bash
 docker-compose run --rm -w /magento composer composer "\$@"
 COMPOSER
 
+cat << REDIS > bin/redis
+#!/usr/bin/env bash
+docker-compose exec redis0 redis-cli "\$@"
+REDIS
 
-chmod +x bin/*.sh
+
+chmod +x bin/*
 
 
 # build images
@@ -591,7 +600,7 @@ else
 
   docker run --rm -v $(pwd)/system:/magento alpine:latest sh -c 'find /magento/ -maxdepth 1 | tail -n+2 | xargs rm -Rf'  || (echo could not cleanup magento directory; exit 1) || exit 1
 
-  ./bin/composer.sh create-project \
+  ./bin/composer create-project \
     --repository-url=https://repo.magento.com/ \
     magento/${magento_distribution}:${magento_version} \
     --no-progress \
@@ -612,7 +621,7 @@ sleep 1s
 
 if [ ! -f $(pwd)/system/app/etc/env.php ]; then
 echo Installing magento and setup connection to database, redis and elasticsearch
-./bin/magento.sh setup:install --cleanup-database \
+./bin/magento setup:install --cleanup-database \
   --base-url=http://${site_domain}/ \
   --db-host=mysql0 \
   --db-name=magento \
@@ -627,14 +636,17 @@ echo Installing magento and setup connection to database, redis and elasticsearc
   --currency=USD \
   --timezone=America/Chicago \
   --use-rewrites=1 \
+  --cache-backend=redis \
   --cache-backend-redis-server=redis0 \
   --cache-backend-redis-db=2 \
   --cache-backend-redis-port=6379 \
   --cache-backend-redis-compress-data=1 \
+  --page-cache=redis \
   --page-cache-redis-server=redis0 \
   --page-cache-redis-port=6379 \
   --page-cache-redis-db=3 \
   --page-cache-redis-compress-data=1 \
+  --session-save=redis \
   --session-save-redis-host=redis0 \
   --session-save-redis-port=6379 \
   --session-save-redis-persistent-id=PERSIS \
@@ -661,10 +673,10 @@ else
 fi
 
 
-./bin/magento.sh deploy:mode:set developer  || (echo could not setup developer mode in php; exit 1) || exit 1
+./bin/magento deploy:mode:set developer  || (echo could not setup developer mode in php; exit 1) || exit 1
 
-./bin/magento.sh module:disable Magento_TwoFactorAuth 
-./bin/magento.sh cache:flush 
+./bin/magento module:disable Magento_TwoFactorAuth 
+./bin/magento cache:flush 
 
 admin_path=$(cat system/app/etc/env.php | egrep -o "admin_[^']*")
 echo navigate to http://${site_domain}/${admin_path}
