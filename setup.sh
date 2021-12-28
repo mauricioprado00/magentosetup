@@ -620,21 +620,20 @@ echo Installing magento and setup connection to database, redis and elasticsearc
   --elasticsearch-enable-auth=0 \
   --elasticsearch-index-prefix=magento2 \
    || (echo could not setup magento install; exit 1) || exit 1
+
+  ./bin/magento deploy:mode:set developer  || (echo could not setup developer mode in php; exit 1) || exit 1
+
+  ./bin/magento module:disable Magento_TwoFactorAuth 
+  ./bin/magento cache:flush 
 else
   echo 'magento is already installed'
 fi
-
-
-./bin/magento deploy:mode:set developer  || (echo could not setup developer mode in php; exit 1) || exit 1
-
-./bin/magento module:disable Magento_TwoFactorAuth 
-./bin/magento cache:flush 
 
 admin_path=$(cat system/app/etc/env.php | egrep -o "admin_[^']*")
 
 echo '# System information' > README.md
 (
-echo -- - Magento system http://${site_domain}/${admin_path} user: ${backend_user} password: ${backend_password}
-echo -- - Phpmyadmin http://localhost:${pma_port} user:${pma_user} password: ${pma_password}
-echo -- - Mailserver http://localhost:${mailserver_port}
+echo - Magento system http://${site_domain}/${admin_path} user: ${backend_user} password: ${backend_password}
+echo - Phpmyadmin http://localhost:${pma_port} user:${pma_user} password: ${pma_password}
+echo - Mailserver http://localhost:${mailserver_port}
 ) | tee -a README.md
