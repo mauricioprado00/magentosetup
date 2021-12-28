@@ -478,6 +478,8 @@ cat << HTACCESSDENY > config/web0/filesystem/magento/generated/.htaccess
 HTACCESSDENY
 
 
+www_data_user_id=$(docker run --rm php:${php_version}-apache cat /etc/passwd \
+  | grep www-data | awk -F ':' '{print $3}')
 mkdir -p config/appdata/
 cat << WEB_STARTUP > config/appdata/startup.sh
 #!/bin/sh
@@ -515,7 +517,7 @@ chmod -R 777 /magento/var/*
 cd /magento
 find var generated vendor pub/static pub/media app/etc -type f -exec chmod g+w {} +
 find var generated vendor pub/static pub/media app/etc -type d -exec chmod g+ws {} +
-chown -R :www-data .
+chown -R :${www_data_user_id} .
 WEB_STARTUP
 chmod +x config/appdata/startup.sh
 
@@ -587,10 +589,18 @@ else
   docker-compose run --rm web0 php -r '@imagecreatefromjpeg();'  || (echo missing imagecreatefromjpeg in php; exit 1) || exit 1
   docker-compose run --rm web0 php -r '@imageftbbox();'  || (echo missing imageftbbox in php; exit 1) || exit 1
 
-  docker run --rm -v $(pwd)/system:/magento alpine:latest bash -c 'rm -Rf /magento/*'
+  docker run --rm -v $(pwd)/system:/magento alpine:latest sh -c 'find /magento/ -maxdepth 1 | tail -n+2 | xargs rm -Rf'  || (echo could not cleanup magento directory; exit 1) || exit 1
 
-  ./bin/composer.sh create-project --repository-url=https://repo.magento.com/ magento/${magento_distribution}:${magento_version} --no-progress --profile --prefer-dist .
+  ./bin/composer.sh create-project \
+    --repository-url=https://repo.magento.com/ \
+    magento/${magento_distribution}:${magento_version} \
+    --no-progress \
+    --profile \
+    --prefer-dist . \
+     || (echo could not create magento project; exit 1) || exit 1
 
+  # copy static .htaccess file
+  cp -Rf system/pub/static config/web0/filesystem/magento/pub/
 fi
 docker-compose up -d web0 || (echo could not start server web0; exit 1) || exit 1
 
@@ -600,6 +610,8 @@ while [ $(docker-compose ps | grep mysql0 | grep Up | grep 3306 | wc -l) -eq 0 ]
 done
 sleep 1s
 
+if [ ! -f $(pwd)/system/app/etc/env.php ]; then
+echo Installing magento and setup connection to database, redis and elasticsearch
 ./bin/magento.sh setup:install --cleanup-database \
   --base-url=http://${site_domain}/ \
   --db-host=mysql0 \
@@ -642,10 +654,17 @@ sleep 1s
   --elasticsearch-host=elast0 \
   --elasticsearch-port=9200 \
   --elasticsearch-enable-auth=0 \
-  --elasticsearch-index-prefix=magento2
+  --elasticsearch-index-prefix=magento2 \
+   || (echo could not setup magento install; exit 1) || exit 1
+else
+  echo magento is already installed
+fi
 
 
-./bin/magento.sh deploy:mode:set developer
+./bin/magento.sh deploy:mode:set developer  || (echo could not setup developer mode in php; exit 1) || exit 1
 
-./bin/magento.sh module:disable Magento_TwoFactorAuth
+./bin/magento.sh module:disable Magento_TwoFactorAuth 
 ./bin/magento.sh cache:flush 
+
+admin_path=$(cat system/app/etc/env.php | egrep -o "admin_[^']*")
+echo navigate to http://${site_domain}/${admin_path}
