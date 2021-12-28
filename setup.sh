@@ -1,4 +1,8 @@
+# store current declared variables
+declare -- | grep '^[a-z_]*=' | sed 's#=.*##g' > before
+
 # configurable variables in .env file
+
 php_version=7.4
 magento_distribution=project-community-edition
 magento_version=2.4
@@ -34,6 +38,10 @@ mailserver_host=mailserver
 # non-configurable variables
 
 magento_repository_url=https://repo.magento.com/
+
+# mark variables to export to .env file
+declare -- | grep '^[a-z_]*='  | sed 's#=.*##g' > after
+
 # https://devdocs.magento.com/guides/v2.3/install-gde/system-requirements.html#system-dependencies
 system_dep=$(cat << DEP
 unzip
@@ -98,39 +106,15 @@ if [ $(find . | wc -l) -ne 1 ]; then
 fi
 
 # create env file
-
 declare -a save_vars
-save_vars=(
-  php_version
-  magento_distribution
-  magento_version
-  mariadb_version
-  mysqldb_version
-  elastic_version
-
-  site_domain
-  backend_email
-  backend_user
-  backend_password
-
-  web_port
-  web_port_secure
-  mailserver_port
-  mysql_root_password
-  mysql_database
-  mysql_user
-  mysql_password
-  mysql_port
-  pma_port
-  pma_user
-  pma_password
-  redis_port
-
-  web_host
-  mysql_host
-  redis_host
-  elast_host
+IFS="," read -r -a save_vars <<< $(
+  echo $(
+    diff before after | \
+    grep '^>' | \
+    sed 's#^..##g') | \
+    sed 's# #,#g'\
 )
+rm before after
 
 printf '' > .env
 for varname in ${save_vars[@]}; do
