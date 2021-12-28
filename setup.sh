@@ -61,6 +61,19 @@ libxml
 "
 
 
+# check that target directory is empty
+if [ $(find . | wc -l) -ne 1 ]; then
+  echo target directory not empty
+  (find . | head -n6; echo '...')  | sed 's#^#  > #g'
+  if [[ "$@" =~ --overwrite ]]; then
+    echo overwriting directory content
+  else
+    echo to force install please specify --overwrite
+    echo '  > '"$0 $@ --overwrite"
+    exit 1
+  fi
+fi
+
 # create credentials
 cat << EOF > auth.json
 {
@@ -583,6 +596,35 @@ cat << REDIS > bin/redis
 docker-compose exec redis0 redis-cli "\$@"
 REDIS
 
+declare -a tools
+tools=("redis" "composer")
+declare -A tools_redis
+tools_redis=(
+  ["info-keyspace"]="info keyspace"
+  ["flushall"]="flushall"
+  ["monitor"]="monitor"
+  ["ping"]="ping"
+)
+declare -A tools_composer
+tools_composer=(
+  ["magento-update-plugin"]="magento-update-plugin"
+  ["update"]="update"
+  ["upgrade"]="upgrade"
+  ["run"]="run"
+  ["list"]="list"
+  ["install"]="install"
+)
+
+for tool in ${tools[@]}; do 
+  eval 'keys=${!tools_'$tool'[@]}'
+  for subtool in $keys; do
+    eval 'command=${tools_'$tool'['$subtool']}'
+cat << BIN_TOOL > bin/${tool}-${subtool}
+#!/usr/bin/env bash
+\$(dirname \$0)/${tool} ${command} "\${@}"
+BIN_TOOL
+  done
+done
 
 chmod +x bin/*
 
