@@ -702,3 +702,13 @@ echo - Magento system http://${site_domain}/${admin_path} user: ${backend_user} 
 echo - Phpmyadmin http://localhost:${pma_port} user:${pma_user} password: ${pma_password}
 echo - Mailserver http://localhost:${mailserver_port}
 ) | tee -a README.md
+
+(
+  printf '%s\n' '# Magento documentation'
+  printf '%s\n' '- [Get your authentication keys](https://devdocs.magento.com/guides/v2.3/install-gde/prereq/connect-auth.html)'
+  printf '%s\n' '- [Quick install](https://devdocs.magento.com/guides/v2.4/install-gde/composer.html)'
+  printf '%s\n' '- [When to clear directories](https://devdocs.magento.com/guides/v2.4/howdoi/php/php_clear-dirs.html)'
+  printf '%s\n' '- [configure elastic search](https://devdocs.magento.com/guides/v2.4/config-guide/elasticsearch/configure-magento.html)'
+  printf '%s\n' '- [elastic search](https://devdocs.magento.com/guides/v2.4/install-gde/prereq/elasticsearch.html)'
+
+) >> README.md
