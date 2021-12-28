@@ -1,5 +1,7 @@
+#!/usr/bin/env bash
+
 # store current declared variables
-declare -- | grep '^[a-z_]*=' | sed 's#=.*##g' > before
+declare -- | grep '^[a-z_]*=' | sed 's#=.*##g' > vardiffbefore
 
 # configurable variables in .env file
 
@@ -40,7 +42,7 @@ mailserver_host=mailserver
 magento_repository_url=https://repo.magento.com/
 
 # mark variables to export to .env file
-declare -- | grep '^[a-z_]*='  | sed 's#=.*##g' > after
+declare -- | grep '^[a-z_]*='  | sed 's#=.*##g' > vardiffafter
 
 # https://devdocs.magento.com/guides/v2.3/install-gde/system-requirements.html#system-dependencies
 system_dep=$(cat << DEP
@@ -86,14 +88,9 @@ EXT
 extensions=$(printf '%s\n' $deps | grep '^ext' | sed 's#^....##g')
 libraries=$(printf '%s\n' $deps | grep '^lib' | sed 's#^....##g')
 
-extensions_already_included="
-hash
-libxml
-"
-
 
 # check that target directory is empty
-if [ $(find . | wc -l) -ne 1 ]; then
+if [ $(find . | grep -v vardiff | wc -l) -ne 1 ]; then
   echo target directory not empty
   (find . | head -n6; echo '...')  | sed 's#^#  > #g'
   if [[ "$@" =~ --overwrite ]]; then
@@ -109,12 +106,12 @@ fi
 declare -a save_vars
 IFS="," read -r -a save_vars <<< $(
   echo $(
-    diff before after | \
+    diff vardiffbefore vardiffafter | \
     grep '^>' | \
     sed 's#^..##g') | \
     sed 's# #,#g'\
 )
-rm before after
+rm vardiff*
 
 printf '' > .env
 for varname in ${save_vars[@]}; do
@@ -140,7 +137,6 @@ version: '3'
 services:
     ${web_host}:
         build: config/${web_host}
-        container_name: ${web_host}
         env_file: .env
         ports:
           - "\${web_port}:80"
@@ -160,13 +156,6 @@ services:
         - \${redis_host}
         - \${elast_host}
         - \${mailserver_host}
-    composer:
-        build: config/composer
-        container_name: composer
-        volumes:
-          - /home/${USER}/.composer:/root/.composer/
-        volumes_from:
-        - appdata
     appdata:
         image: alpine:latest
         volumes:
@@ -184,6 +173,9 @@ services:
           - ./config/\${web_host}/filesystem/magento/media/catalog:/magento/pub/media/catalog
           - ./config/\${web_host}/filesystem/magento/media/wysiwyg:/magento/pub/media/wysiwyg
           - ./auth.json:/magento/auth.json
+          - ./auth.json:/magento/var/composer_home/auth.json
+          - /home/${USER}/.composer:/root/.composer/
+          - /home/${USER}/.composer:/magento/var/composer_home/
         command: /bin/sh /startup.sh
     ${mailserver_host}:
       image: reachfive/fake-smtp-server
@@ -207,7 +199,6 @@ services:
       environment:
         - "discovery.type=single-node"
     ${pma_host}:
-        container_name: \${pma_host}
         image: phpmyadmin/phpmyadmin:latest
         env_file: .env
         environment:
@@ -272,51 +263,13 @@ else
   cp -Rv $(dirname $0)/config/composer/cache /home/${USER}/.composer
 fi
 
-mkdir -p config/composer/
-printf '%s' "$extensions_already_included" > .extensions_already_included
-docker run --rm php:${php_version}-alpine php -m | grep -v '\[' | filter-list | grep -v '^$' > .extensions_already_included
-install_dependencies=$(printf '%s\n' ${system_dep} | filter-list | sed 's#^#RUN apk add #g')
-#install_extensions=$(printf '%s\n' ${extensions} | grep -v zip | grep -vFx -f .extensions_already_included | sed 's#^#RUN apk add php-#g')
-install_extensions=$(
-  install_extensions_string 'apk add php-' "$(printf '%s\n' ${extensions} | \
-  grep -v zip | \
-  grep -vFx -f .extensions_already_included)" | \
-  grep -v configure
-)
-
-cat << DOCKERFILE > config/composer/Dockerfile
-FROM php:${php_version}-alpine
-
-RUN apk add zip zlib-dev
-${install_dependencies}
-
-RUN cp /usr/local/etc/php/php.ini-development  /usr/local/etc/php/php.ini
-RUN sed -i 's#memory_limit.*#memory_limit=-1#g' /usr/local/etc/php/php.ini
-RUN cd /usr/local/bin/ && \
-    php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');" && \
-    php composer-setup.php && \
-    php -r "unlink('composer-setup.php');" && \
-    ln -s composer.phar composer && \
-    composer self-update --1
-
-${install_extensions}
-
-RUN cp /usr/lib/php7/modules/* /usr/local/lib/php/extensions/\$(ls /usr/local/lib/php/extensions/)
-RUN cp /etc/php7/conf.d/* /usr/local/etc/php/conf.d
-RUN apk add zip zlib-dev libzip libzip-dev
-RUN docker-php-ext-install zip
-RUN composer global require hirak/prestissimo
-
-DOCKERFILE
-
 # create Dockerfile for web container
+docker run --rm php:${php_version}-apache php -m | grep -v '\[' | filter-list | grep -v '^$' > .extensions_already_included
 install_extensions=$(
   install_extensions_string 'docker-php-ext-install ' "$(printf '%s\n' ${extensions} | \
   grep -vFx -f .extensions_already_included)"
 )
 
-printf '%s' "$extensions_already_included" > .extensions_already_included
-docker run --rm php:${php_version}-apache php -m | grep -v '\[' | filter-list | grep -v '^$' > .extensions_already_included
 install_dependencies=$(printf '%s\n' ${system_dep} | filter-list | sed 's#^#RUN apt-get install -y #g')
 #install_extensions=$(printf '%s\n' ${extensions} | grep -vFx -f .extensions_already_included | sed 's#^#RUN docker-php-ext-install #g')
 mkdir -p config/${web_host}/
@@ -537,7 +490,7 @@ RUN
 
 cat << COMPOSER > bin/composer
 #!/usr/bin/env bash
-docker-compose run --rm -w /magento composer composer "\$@"
+docker-compose run --rm -w /magento ${web_host} composer "\$@"
 COMPOSER
 
 cat << REDIS > bin/redis
@@ -591,7 +544,15 @@ else
 
   docker run --rm -v $(pwd)/system:/magento alpine:latest sh -c 'find /magento/ -maxdepth 1 | tail -n+2 | xargs rm -Rf'  || (echo could not cleanup magento directory; exit 1) || exit 1
 
-  ./bin/composer create-project \
+  web_image=$(docker-compose build ${web_host} 2>&1 | tail -n1 | awk '{print $NF}')
+  docker run --rm -ti --name create-magento-project \
+    -v /home/${USER}/.composer:/root/.composer/ \
+    -v $(pwd)/auth.json:/root/.composer/auth.json \
+    -v $(pwd)/system:/magento \
+    -w /magento \
+    ${web_image} \
+    composer \
+    create-project \
     --repository-url=${magento_repository_url} \
     magento/${magento_distribution}:${magento_version} \
     --no-progress \
@@ -660,7 +621,7 @@ echo Installing magento and setup connection to database, redis and elasticsearc
   --elasticsearch-index-prefix=magento2 \
    || (echo could not setup magento install; exit 1) || exit 1
 else
-  echo magento is already installed
+  echo 'magento is already installed'
 fi
 
 
@@ -671,7 +632,7 @@ fi
 
 admin_path=$(cat system/app/etc/env.php | egrep -o "admin_[^']*")
 
-printf '# System information'
+echo '# System information' > README.md
 (
 echo -- - Magento system http://${site_domain}/${admin_path} user: ${backend_user} password: ${backend_password}
 echo -- - Phpmyadmin http://localhost:${pma_port} user:${pma_user} password: ${pma_password}
