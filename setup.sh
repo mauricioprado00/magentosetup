@@ -1,3 +1,4 @@
+# configurable variables in .env file
 php_version=7.4
 magento_distribution=project-community-edition
 magento_version=2.4
@@ -10,7 +11,29 @@ backend_email=testing@magento2.com
 backend_user=admin
 backend_password=Admin123
 
+web_port=80
+web_port_secure=443
+mailserver_port=1080
+mysql_root_password=root
+mysql_database=magento
+mysql_user=maguser
+mysql_password=magpass
+mysql_port=3306
+pma_port=8081
+pma_user=root
+pma_password=root
+redis_port=6379
 
+web_host=web0
+pma_host=phpmyadmin
+mysql_host=mysql0
+redis_host=redis0
+elast_host=elast0
+mailserver_host=mailserver
+
+# non-configurable variables
+
+magento_repository_url=https://repo.magento.com/
 # https://devdocs.magento.com/guides/v2.3/install-gde/system-requirements.html#system-dependencies
 system_dep=$(cat << DEP
 unzip
@@ -74,6 +97,46 @@ if [ $(find . | wc -l) -ne 1 ]; then
   fi
 fi
 
+# create env file
+
+declare -a save_vars
+save_vars=(
+  php_version
+  magento_distribution
+  magento_version
+  mariadb_version
+  mysqldb_version
+  elastic_version
+
+  site_domain
+  backend_email
+  backend_user
+  backend_password
+
+  web_port
+  web_port_secure
+  mailserver_port
+  mysql_root_password
+  mysql_database
+  mysql_user
+  mysql_password
+  mysql_port
+  pma_port
+  pma_user
+  pma_password
+  redis_port
+
+  web_host
+  mysql_host
+  redis_host
+  elast_host
+)
+
+printf '' > .env
+for varname in ${save_vars[@]}; do
+  declare -p $varname | sed 's#declare -- ##g' >> .env
+done
+
 # create credentials
 cat << EOF > auth.json
 {
@@ -86,30 +149,33 @@ cat << EOF > auth.json
 }
 EOF
 
+
 # create docker container
 cat << EOF > docker-compose.yml
 version: '3'
 services:
-    web0:
-        build: config/web0
-        container_name: web0
+    ${web_host}:
+        build: config/${web_host}
+        container_name: ${web_host}
+        env_file: .env
         ports:
-          - "80:80"
-          - "443:443"
-          - "32823:22"
+          - "\${web_port}:80"
+          - "\${web_port_secure}:443"
 #        volumes:
-#        - $(pwd)/config/web0/filesystem/magento/env.php:/magento/app/etc/env.php
+#        - ./config/${web_host}/filesystem/magento/env.php:/magento/app/etc/env.php
         volumes_from:
         - appdata
         - magentodata
         depends_on:
-        - mysql0
-        - redis0
-        - elast0
+        - \${mysql_host}
+        - \${redis_host}
+        - \${elast_host}
+        - \${mailserver_host}
         links:
-        - "mysql0:mysql0"
-        - "redis0:redis0"
-        - "elast0:elast0"
+        - \${mysql_host}
+        - \${redis_host}
+        - \${elast_host}
+        - \${mailserver_host}
     composer:
         build: config/composer
         container_name: composer
@@ -120,55 +186,61 @@ services:
     appdata:
         image: alpine:latest
         volumes:
-          - $(pwd)/system:/magento:cached
-          - $(pwd)/bin:/tools
-          - $(pwd)/auth.json:/root/.composer/auth.json
+          - ./system:/magento:cached
+          - ./bin:/tools
+          - ./auth.json:/root/.composer/auth.json
     magentodata:
         image: alpine:latest
         volumes:
-          - $(pwd)/config/appdata/startup.sh:/startup.sh
-          - $(pwd)/config/web0/filesystem/magento/var/:/magento/var/
-          - $(pwd)/config/web0/filesystem/etc/apache2/sites-available/000-default.conf:/etc/apache2/sites-available/000-default.conf
-          - $(pwd)/config/web0/filesystem/magento/generated/:/magento/generated/
-          - $(pwd)/config/web0/filesystem/magento/pub/static/:/magento/pub/static/
-          - $(pwd)/config/web0/filesystem/magento/media/catalog:/magento/pub/media/catalog
-          - $(pwd)/config/web0/filesystem/magento/media/wysiwyg:/magento/pub/media/wysiwyg
+          - ./config/appdata/startup.sh:/startup.sh
+          - ./config/\${web_host}/filesystem/magento/var/:/magento/var/
+          - ./config/\${web_host}/filesystem/etc/apache2/sites-available/000-default.conf:/etc/apache2/sites-available/000-default.conf
+          - ./config/\${web_host}/filesystem/magento/generated/:/magento/generated/
+          - ./config/\${web_host}/filesystem/magento/pub/static/:/magento/pub/static/
+          - ./config/\${web_host}/filesystem/magento/media/catalog:/magento/pub/media/catalog
+          - ./config/\${web_host}/filesystem/magento/media/wysiwyg:/magento/pub/media/wysiwyg
+          - ./auth.json:/magento/auth.json
         command: /bin/sh /startup.sh
-    mailserver:
+    ${mailserver_host}:
       image: reachfive/fake-smtp-server
+      env_file: .env
       ports:
-          - "1080:1080"
-    mysql0:
-      image: mysql:${mysqldb_version}
+          - "\${mailserver_port}:1080"
+    ${mysql_host}:
+      image: mysql:\${mysqldb_version}
+      env_file: .env
       environment:
-        MYSQL_ROOT_PASSWORD: root
-        MYSQL_DATABASE: magento
-        MYSQL_USER: maguser
-        MYSQL_PASSWORD: magpass
+        MYSQL_ROOT_PASSWORD: \${mysql_root_password}
+        MYSQL_DATABASE: \${mysql_database}
+        MYSQL_USER: \${mysql_user}
+        MYSQL_PASSWORD: \${mysql_password}
       volumes:
         - ./data/:/data/
-        #- $(pwd)/config/setup/init/config-magento.sql:/docker-entrypoint-initdb.d/02-init.sql
-    elast0:
-      image: elasticsearch:${elastic_version}
+        #- ./config/setup/init/config-magento.sql:/docker-entrypoint-initdb.d/02-init.sql
+    ${elast_host}:
+      image: elasticsearch:\${elastic_version}
+      env_file: .env
       environment:
         - "discovery.type=single-node"
-    phpmyadmin:
-        container_name: phpmyadmin
+    ${pma_host}:
+        container_name: \${pma_host}
         image: phpmyadmin/phpmyadmin:latest
+        env_file: .env
         environment:
-          - MYSQL_ROOT_PASSWORD=root
-          - PMA_USER=root
-          - PMA_PASSWORD=root
+          - MYSQL_ROOT_PASSWORD=\${mysql_root_password}
+          - PMA_USER=\${pma_user}
+          - PMA_PASSWORD=\${pma_password}
         ports:
-          - "8080:80"
+          - "\${pma_port}:80"
         links:
-          - mysql0:db
+          - \${mysql_host}:db
         depends_on:
-          - mysql0
-    redis0:
+          - \${mysql_host}
+    ${redis_host}:
       image: redis:latest
+      env_file: .env
       ports:
-        - "6379:6379"
+        - "\${redis_port}:6379"
 volumes:
     db-data:
         external: false
@@ -263,8 +335,8 @@ printf '%s' "$extensions_already_included" > .extensions_already_included
 docker run --rm php:${php_version}-apache php -m | grep -v '\[' | filter-list | grep -v '^$' > .extensions_already_included
 install_dependencies=$(printf '%s\n' ${system_dep} | filter-list | sed 's#^#RUN apt-get install -y #g')
 #install_extensions=$(printf '%s\n' ${extensions} | grep -vFx -f .extensions_already_included | sed 's#^#RUN docker-php-ext-install #g')
-mkdir -p config/web0/
-cat << DOCKERFILE > config/web0/Dockerfile
+mkdir -p config/${web_host}/
+cat << DOCKERFILE > config/${web_host}/Dockerfile
 FROM php:${php_version}-apache
 
 
@@ -302,8 +374,8 @@ WORKDIR /magento
 DOCKERFILE
 
 # create virtualhost
-mkdir -p config/web0/filesystem/etc/apache2/sites-available/
-cat << APACHE_VIRTUALHOST > config/web0/filesystem/etc/apache2/sites-available/000-default.conf
+mkdir -p config/${web_host}/filesystem/etc/apache2/sites-available/
+cat << APACHE_VIRTUALHOST > config/${web_host}/filesystem/etc/apache2/sites-available/000-default.conf
 <VirtualHost *:80>
         # The ServerName directive sets the request scheme, hostname and port that
         # the server uses to identify itself. This is used when creating
@@ -344,141 +416,30 @@ cat << APACHE_VIRTUALHOST > config/web0/filesystem/etc/apache2/sites-available/0
 APACHE_VIRTUALHOST
 
 # create magento configuration
-mkdir -p config/web0/filesystem/magento/
-cat << MAGENTO_ENV > config/web0/filesystem/magento/env.php
+mkdir -p config/${web_host}/filesystem/magento/
+cat << MAGENTO_ENV > config/${web_host}/filesystem/magento/env.php
 <?php
-return [
-    'backend' => [
-        'frontName' => 'adminelbow'
-    ],
-    'crypt' => [
-        'key' => 'c4ee26a235f98b8afbb2412232e55628'
-    ],
-    'session' => [
-        'save' => 'redis',
-        'redis' => [
-            'host' => 'redis0',
-            'port' => '6379',
-            'password' => '',
-            'timeout' => '2.5',
-            'persistent_identifier' => '',
-            'database' => '2',
-            'compression_threshold' => '2048',
-            'compression_library' => 'gzip',
-            'log_level' => '3',
-            'max_concurrency' => '6',
-            'break_after_frontend' => '5',
-            'break_after_adminhtml' => '30',
-            'first_lifetime' => '600',
-            'bot_first_lifetime' => '60',
-            'bot_lifetime' => '7200',
-            'disable_locking' => '0',
-            'min_lifetime' => '60',
-            'max_lifetime' => '2592000',
-            'sentinel_master' => '',
-            'sentinel_servers' => '',
-            'sentinel_connect_retries' => '5',
-            'sentinel_verify_master' => '0'
-        ]
-    ],
-    'db' => [
-        'table_prefix' => '',
-        'connection' => [
-            'default' => [
-                'host' => 'mysql0',
-                'dbname' => 'magento',
-                'username' => 'root',
-                'password' => 'root',
-                'model' => 'mysql4',
-                'engine' => 'innodb',
-                'initStatements' => 'SET NAMES utf8;',
-                'active' => '1'
-            ]
-        ]
-    ],
-    'resource' => [
-        'default_setup' => [
-            'connection' => 'default'
-        ]
-    ],
-    'x-frame-options' => 'SAMEORIGIN',
-    'MAGE_MODE' => 'developer',
-    'cache_types' => [
-        'config' => 1,
-        'layout' => 1,
-        'block_html' => 1,
-        'collections' => 1,
-        'reflection' => 1,
-        'db_ddl' => 1,
-        'eav' => 1,
-        'customer_notification' => 1,
-        'full_page' => 1,
-        'config_integration' => 1,
-        'config_integration_api' => 1,
-        'translate' => 1,
-        'config_webservice' => 1,
-        'compiled_config' => 1,
-        'vertex' => 1,
-        'google_product' => 0
-    ],
-    'install' => [
-        'date' => 'Sat, 29 Apr 2017 20:51:47 +0000'
-    ],
-    'downloadable_domains' => [
-        'stage.elbowchocolates.com'
-    ],
-    'cache' => [
-        'frontend' => [
-            'default' => [
-                'id_prefix' => '649_',
-                'backend' => 'Cm_Cache_Backend_Redis',
-                'backend_options' => [
-                    'server' => 'redis0',
-                    'database' => '0',
-                    'port' => '6379',
-                    'password' => '',
-                    'compress_data' => '1',
-                    'compression_lib' => ''
-                ]
-            ],
-            'page_cache' => [
-                'id_prefix' => '649_',
-                'backend' => 'Cm_Cache_Backend_Redis',
-                'backend_options' => [
-                    'server' => 'redis0',
-                    'database' => '1',
-                    'port' => '6379',
-                    'password' => '',
-                    'compress_data' => '0',
-                    'compression_lib' => ''
-                ]
-            ]
-        ]
-    ],
-    'lock' => [
-        'provider' => 'db',
-        'config' => [
-            'prefix' => ''
-        ]
-    ]
-];
+return [];
 MAGENTO_ENV
 
-mkdir -p config/web0/filesystem/magento/generated/
-mkdir -p config/web0/filesystem/magento/log/
-mkdir -p config/web0/filesystem/magento/media/catalog/
-mkdir -p config/web0/filesystem/magento/media/wysiwyg/
-mkdir -p config/web0/filesystem/magento/pub/static/
-mkdir -p config/web0/filesystem/magento/var/
+mkdir -p config/${web_host}/filesystem/magento/
+pushd    config/${web_host}/filesystem/magento/
+mkdir -p generated/
+mkdir -p log/
+mkdir -p media/catalog/
+mkdir -p media/wysiwyg/
+mkdir -p pub/static/
+mkdir -p var/
 echo '*' \
-  > config/web0/filesystem/magento/generated/.gitignore \
-  > config/web0/filesystem/magento/log/.gitignore \
-  > config/web0/filesystem/magento/media/catalog/.gitignore \
-  > config/web0/filesystem/magento/media/wysiwyg/.gitignore \
-  > config/web0/filesystem/magento/pub/static/.gitignore \
-  > config/web0/filesystem/magento/var/.gitignore
+  > generated/.gitignore \
+  > log/.gitignore \
+  > media/catalog/.gitignore \
+  > media/wysiwyg/.gitignore \
+  > pub/static/.gitignore \
+  > var/.gitignore
+popd
 
-cat << HTACCESSDENY > config/web0/filesystem/magento/generated/.htaccess
+cat << HTACCESSDENY > config/${web_host}/filesystem/magento/generated/.htaccess
 <IfVersion < 2.4>
     order allow,deny
     deny from all
@@ -567,23 +528,27 @@ mkdir system
 # create binaries
 
 mkdir bin
-cat << RUN > bin/run.sh
-docker run --rm -w /there -v $(pwd)/auth.json:/root/.composer/auth.json -v $(pwd):/there php:${php_version}-apache "\$@"
+cat << 'RUN' > bin/run.sh
+docker run --rm -w /there \
+  -v $(dirname $0)/../auth.json:/root/.composer/auth.json \
+  -v $(dirname $0)/..:/there \
+  php:${php_version}-apache \
+  "\$@"
 RUN
 
 cat << RUN > bin/inc.sh
 #!/usr/bin/env bash
-docker-compose run --rm -w /tools web0 "\$@"
+docker-compose run --rm -w /tools ${web_host} "\$@"
 RUN
 
 cat << RUN > bin/app.sh
 #!/usr/bin/env bash
-docker-compose exec -w /magento web0 "\$@"
+docker-compose exec -w /magento ${web_host} "\$@"
 RUN
 
 cat << RUN > bin/magento
 #!/usr/bin/env bash
-docker-compose exec -w /magento web0 ./bin/magento "\$@"
+docker-compose exec -w /magento ${web_host} ./bin/magento "\$@"
 RUN
 
 cat << COMPOSER > bin/composer
@@ -593,7 +558,7 @@ COMPOSER
 
 cat << REDIS > bin/redis
 #!/usr/bin/env bash
-docker-compose exec redis0 redis-cli "\$@"
+docker-compose exec ${redis_host} redis-cli "\$@"
 REDIS
 
 declare -a tools
@@ -637,13 +602,13 @@ if [ -f $(pwd)/system/composer.json ]; then
   echo "Magento project already created, skipping"
 else
   # check images
-  docker-compose run --rm web0 php -r '@imagecreatefromjpeg();'  || (echo missing imagecreatefromjpeg in php; exit 1) || exit 1
-  docker-compose run --rm web0 php -r '@imageftbbox();'  || (echo missing imageftbbox in php; exit 1) || exit 1
+  docker-compose run --rm ${web_host} php -r '@imagecreatefromjpeg();'  || (echo missing imagecreatefromjpeg in php; exit 1) || exit 1
+  docker-compose run --rm ${web_host} php -r '@imageftbbox();'  || (echo missing imageftbbox in php; exit 1) || exit 1
 
   docker run --rm -v $(pwd)/system:/magento alpine:latest sh -c 'find /magento/ -maxdepth 1 | tail -n+2 | xargs rm -Rf'  || (echo could not cleanup magento directory; exit 1) || exit 1
 
   ./bin/composer create-project \
-    --repository-url=https://repo.magento.com/ \
+    --repository-url=${magento_repository_url} \
     magento/${magento_distribution}:${magento_version} \
     --no-progress \
     --profile \
@@ -651,12 +616,12 @@ else
      || (echo could not create magento project; exit 1) || exit 1
 
   # copy static .htaccess file
-  cp -Rf system/pub/static config/web0/filesystem/magento/pub/
+  cp -Rf system/pub/static config/${web_host}/filesystem/magento/pub/
 fi
-docker-compose up -d web0 || (echo could not start server web0; exit 1) || exit 1
+docker-compose up -d ${web_host} || (echo could not start server ${web_host}; exit 1) || exit 1
 
-echo waiting mysql0 to be available on port 3306
-while [ $(docker-compose ps | grep mysql0 | grep Up | grep 3306 | wc -l) -eq 0 ]; do
+echo waiting ${mysql_host} to become available on port ${mysql_port}
+while [ $(docker-compose ps | grep ${mysql_host} | grep Up | grep ${mysql_port} | wc -l) -eq 0 ]; do
   sleep 0.5s
 done
 sleep 1s
@@ -665,10 +630,10 @@ if [ ! -f $(pwd)/system/app/etc/env.php ]; then
 echo Installing magento and setup connection to database, redis and elasticsearch
 ./bin/magento setup:install --cleanup-database \
   --base-url=http://${site_domain}/ \
-  --db-host=mysql0 \
-  --db-name=magento \
-  --db-user=root \
-  --db-password=root \
+  --db-host=${mysql_host} \
+  --db-name=${mysql_database} \
+  --db-user=${mysql_user} \
+  --db-password=${mysql_password} \
   --admin-firstname=admin \
   --admin-lastname=admin \
   --admin-email=${backend_email} \
@@ -679,18 +644,18 @@ echo Installing magento and setup connection to database, redis and elasticsearc
   --timezone=America/Chicago \
   --use-rewrites=1 \
   --cache-backend=redis \
-  --cache-backend-redis-server=redis0 \
+  --cache-backend-redis-server=${redis_host} \
   --cache-backend-redis-db=2 \
-  --cache-backend-redis-port=6379 \
+  --cache-backend-redis-port=${redis_port} \
   --cache-backend-redis-compress-data=1 \
   --page-cache=redis \
-  --page-cache-redis-server=redis0 \
-  --page-cache-redis-port=6379 \
+  --page-cache-redis-server=${redis_host} \
+  --page-cache-redis-port=${redis_port} \
   --page-cache-redis-db=3 \
   --page-cache-redis-compress-data=1 \
   --session-save=redis \
-  --session-save-redis-host=redis0 \
-  --session-save-redis-port=6379 \
+  --session-save-redis-host=${redis_host} \
+  --session-save-redis-port=${redis_port} \
   --session-save-redis-persistent-id=PERSIS \
   --session-save-redis-db=4 \
   --session-save-redis-compression-threshold=2048 \
@@ -705,7 +670,7 @@ echo Installing magento and setup connection to database, redis and elasticsearc
   --session-save-redis-min-lifetime=60 \
   --session-save-redis-max-lifetime=2592000 \
   --search-engine=elasticsearch7 \
-  --elasticsearch-host=elast0 \
+  --elasticsearch-host=${elast_host} \
   --elasticsearch-port=9200 \
   --elasticsearch-enable-auth=0 \
   --elasticsearch-index-prefix=magento2 \
@@ -721,4 +686,10 @@ fi
 ./bin/magento cache:flush 
 
 admin_path=$(cat system/app/etc/env.php | egrep -o "admin_[^']*")
-echo navigate to http://${site_domain}/${admin_path}
+
+printf '# System information'
+(
+echo -- - Magento system http://${site_domain}/${admin_path} user: ${backend_user} password: ${backend_password}
+echo -- - Phpmyadmin http://localhost:${pma_port} user:${pma_user} password: ${pma_password}
+echo -- - Mailserver http://localhost:${mailserver_port}
+) | tee -a README.md
