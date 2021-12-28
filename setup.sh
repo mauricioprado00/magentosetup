@@ -37,6 +37,10 @@ redis_host=redis0
 elast_host=elast0
 mailserver_host=mailserver
 
+redis_db_session_save=4
+redis_db_page_cache=3
+redis_db_backend=2
+
 # non-configurable variables
 
 magento_repository_url=https://repo.magento.com/
@@ -478,9 +482,10 @@ cat << RUN > bin/inc.sh
 docker-compose run --rm -w /tools ${web_host} "\$@"
 RUN
 
-cat << RUN > bin/app.sh
+cat << RUN > bin/app
 #!/usr/bin/env bash
-docker-compose exec -w /magento ${web_host} "\$@"
+single=\$@
+docker-compose exec -w /magento ${web_host} bash -c "\$single"
 RUN
 
 cat << RUN > bin/magento
@@ -498,14 +503,34 @@ cat << REDIS > bin/redis
 docker-compose exec ${redis_host} redis-cli "\$@"
 REDIS
 
+cat << RUN > bin/mysql
+#!/usr/bin/env bash
+source \$(dirname \$0)/../.env
+docker-compose exec ${mysql_host} mysql \
+  -u${mysql_user} -p${mysql_password} ${mysql_database} \
+  -A "\$@"
+RUN
+
+cat << RUN > bin/mysqldump
+#!/usr/bin/env bash
+source \$(dirname \$0)/../.env
+docker-compose exec ${mysql_host} mysqldump \
+  -u${mysql_user} -p${mysql_password} ${mysql_database} \
+  "\$@" 2>/dev/null
+RUN
+
+
 declare -a tools
-tools=("redis" "composer")
+tools=("redis" "composer", "mysql", "mysqldump", "magento", "app")
 declare -A tools_redis
 tools_redis=(
   ["info-keyspace"]="info keyspace"
   ["flushall"]="flushall"
   ["monitor"]="monitor"
   ["ping"]="ping"
+  ["flush-page-cache"]="-n ${redis_db_page_cache} FLUSHDB"
+  ["flush-session-save"]="-n ${redis_db_session_save} FLUSHDB"
+  ["flush-backend"]="-n ${redis_db_backend} FLUSHDB"
 )
 declare -A tools_composer
 tools_composer=(
@@ -515,6 +540,28 @@ tools_composer=(
   ["run"]="run"
   ["list"]="list"
   ["install"]="install"
+)
+declare -A tools_mysql
+tools_mysql=(
+  ["show-tables"]='-e "show tables"'
+)
+declare -A tools_mysqldump
+tools_mysqldump=(
+  ["no-data"]='--no-data'
+  ["no-create-info"]='--no-create-info'
+)
+declare -A tools_magento
+tools_magento=(
+  ["deploy-static"]='setup:static-content:deploy -f'
+  ["developer-mode"]='deploy:mode:set developer -s'
+  ["production-mode"]='deploy:mode:set production'
+)
+declare -A tools_app
+tools_app=(
+  ["clear-code-generated"]='rm -rf "/magento/generated/code/*"'
+  ["clear-metadata-generated"]='rm -rf "/magento/generated/metadata/*"'
+  ["clear-view-preprocessed"]='rm -rf "/magento/var/view_preprocessed/*"'
+  ["clear-static"]='"rm -rf "/magento/pub/static/*""'
 )
 
 for tool in ${tools[@]}; do 
@@ -590,19 +637,19 @@ echo Installing magento and setup connection to database, redis and elasticsearc
   --use-rewrites=1 \
   --cache-backend=redis \
   --cache-backend-redis-server=${redis_host} \
-  --cache-backend-redis-db=2 \
+  --cache-backend-redis-db=${redis_db_backend} \
   --cache-backend-redis-port=${redis_port} \
   --cache-backend-redis-compress-data=1 \
   --page-cache=redis \
   --page-cache-redis-server=${redis_host} \
   --page-cache-redis-port=${redis_port} \
-  --page-cache-redis-db=3 \
+  --page-cache-redis-db=${redis_db_page_cache} \
   --page-cache-redis-compress-data=1 \
   --session-save=redis \
   --session-save-redis-host=${redis_host} \
   --session-save-redis-port=${redis_port} \
   --session-save-redis-persistent-id=PERSIS \
-  --session-save-redis-db=4 \
+  --session-save-redis-db=${redis_db_session_save} \
   --session-save-redis-compression-threshold=2048 \
   --session-save-redis-log-level=7\
   --session-save-redis-max-concurrency=6 \
