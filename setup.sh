@@ -477,6 +477,24 @@ docker run --rm -w /there \
   "\$@"
 RUN
 
+cat << RUN > bin/app-stop
+#!/usr/bin/env bash
+docker-compose stop
+RUN
+
+cat << RUN > bin/app-start
+#!/usr/bin/env bash
+source \$(dirname \$0)/../.env
+docker-compose start -d \${web_host}
+RUN
+
+cat << RUN > bin/app-destroy-including-volumes
+#!/usr/bin/env bash
+docker-compose stop
+docker-compose down -v
+docker-compose rm -f
+RUN
+
 cat << RUN > bin/inc.sh
 #!/usr/bin/env bash
 docker-compose run --rm -w /tools ${web_host} "\$@"
