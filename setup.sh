@@ -198,6 +198,7 @@ services:
         - \${redis_host}
         - \${elast_host}
         - \${mailserver_host}
+        - \${pma_host}
         links:
         - \${mysql_host}
         - \${redis_host}
