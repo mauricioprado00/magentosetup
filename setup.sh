@@ -1,5 +1,58 @@
 #!/usr/bin/env bash
 
+# check and configure composer's configuration to have magento credentials
+request_credentials=0
+if [ ! -f ~/.config/composer/auth.json ]; then
+  request_credentials=1
+else 
+  username=$(cat ~/.config/composer/auth.json | jq -r '.["http-basic"]["repo.magento.com"]["username"]')
+  password=$(cat ~/.config/composer/auth.json | jq -r '.["http-basic"]["repo.magento.com"]["password"]')
+  #curl -kf https://${username}:${password}@www.magentocommerce.com/products/downloads/info/help >/dev/null 2>&1 || request_credentials=1
+  (curl -kf https://${username}:${password}@www.magentocommerce.com/products/downloads/info/help >/dev/null 2>&1 \
+   || curl -kf https://${username}:${password}@repo.magento.com/packages.json >/dev/null 2>&1) || request_credentials=1
+fi
+
+if [ $request_credentials -eq 1 ]; then
+  echo missing magento credentials in $(pushd ~/.config/composer/ >/dev/null 2>&1 ; pwd)/auth.json
+  echo Please find out your authentication credentials for magento here https://devdocs.magento.com/guides/v2.3/install-gde/prereq/connect-auth.html
+  echo -n Username: 
+  read username
+  echo -n Password: 
+  read password
+  credentials_ok=0
+  (curl -kf https://${username}:${password}@www.magentocommerce.com/products/downloads/info/help >/dev/null 2>&1 \
+   || curl -kf https://${username}:${password}@repo.magento.com/packages.json >/dev/null 2>&1) \
+    || exit $(echo credentials are invalid 1>&2)
+
+  # update credentials in auth.json
+  which jq > /dev/null
+  if [ $? -ne 0 ]; then
+    if [ -f ~/.config/composer/auth.json ]; then
+      echo "missing jq tool to modify composer\'s auth configuration file"
+      echo "please paste the following content in "$(pushd ~/.config/composer/ >/dev/null 2>&1 ; pwd)/auth.json
+      cat << CONFIG 
+{
+  "http-basic": {
+    "repo.magento.com": {
+      "username": "${username}",
+      "password": "${password}"
+    }
+  }
+}
+CONFIG
+      echo "and then restart the script $0"
+      exit
+    fi
+  fi
+  
+  (cat ~/.config/composer/auth.json 2>/dev/null || echo '{}') \
+    | jq '.["http-basic"]["repo.magento.com"] = {
+        "username": "'${username}'",
+        "password": "'${password}'"
+        }' \
+    | tee ~/.config/composer/auth.json  
+fi
+
 # store current declared variables
 declare -- | grep '^[a-z_]*=' | sed 's#=.*##g' > vardiffbefore
 
@@ -123,17 +176,7 @@ for varname in ${save_vars[@]}; do
 done
 
 # create credentials
-cat << EOF > auth.json
-{
-  "http-basic": {
-    "repo.magento.com": {
-      "username": "xxx",
-      "password": "xxx"
-    }
-  }
-}
-EOF
-
+cp ~/.config/composer/auth.json .
 
 # create docker container
 cat << EOF > docker-compose.yml
